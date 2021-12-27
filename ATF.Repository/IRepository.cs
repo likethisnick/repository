@@ -14,7 +14,7 @@
 
 		T GetItem<T>(Guid id) where T : BaseModel, new();
 
-		List<T> GetItems<T>(string filterPropertyName, Guid filterValue) where T : BaseModel, new();
+		List<T> GetItems<T>(string filterPropertyName, Guid filterValue, int rowCount = -1) where T : BaseModel, new();
 
 		T CreateItem<T>() where T : BaseModel, new();
 

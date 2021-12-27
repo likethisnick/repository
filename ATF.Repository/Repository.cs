@@ -99,13 +99,16 @@
 			return model;
 		}
 
-		private List<IDictionary<string, object>> GetRecordsValues<T>(Filter filter) where T : BaseModel, new() {
+		private List<IDictionary<string, object>> GetRecordsValues<T>(Filter filter, int rowCount) where T : BaseModel, new() {
 			List<IDictionary<string, object>> response = new List<IDictionary<string, object>>();
 			if (!DataStoreEnabled || string.IsNullOrEmpty(filter.EntityColumnName) || filter.EntityColumnValue == Guid.Empty) {
 				return response;
 			}
 			try {
 				var esq = GetValuesEsq<T>(filter);
+				if (rowCount > 0) {
+					esq.RowCount = rowCount;
+                }
 				var collection = esq.GetEntityCollection(UserConnection);
 				collection.ForEach(entity => {
 					var values = GetValuesFromEntity<T>(entity);
@@ -116,6 +119,29 @@
 					$"GetRecordsValues. DetailLinkPropertyName: {filter.EntityColumnName}, MasterId: {filter.EntityColumnValue}. \n ErrorMessage: {e.Message}. At: {e.StackTrace}");
 				throw;
 			}
+			return response;
+		}
+
+		private List<IDictionary<string, object>> GetRecordsValues<T>(EntitySchemaQueryFilterCollection filterCollection, int rowCount) where T : BaseModel, new() {
+			List<IDictionary<string, object>> response = new List<IDictionary<string, object>>();
+			if (!DataStoreEnabled) {
+				return response;
+			}
+
+			try {
+				EntitySchemaQuery valuesEsq = GetValuesEsq<T>(filterCollection);
+				if (rowCount > 0) {
+					valuesEsq.RowCount = rowCount;
+				}
+				EntityCollection entityCollection = valuesEsq.GetEntityCollection(UserConnection);
+				entityCollection.ForEach(delegate (Entity entity) {
+					IDictionary<string, object> valuesFromEntity = GetValuesFromEntity<T>(entity);
+					response.Add(valuesFromEntity);
+				});
+			} catch (Exception) {
+				throw;
+			}
+
 			return response;
 		}
 
@@ -164,6 +190,46 @@
 			}
 			return esq;
 		}
+
+		private EntitySchemaQuery GetValuesEsq<T>(EntitySchemaQueryFilterCollection filterCollection) where T : BaseModel, new() {
+			Type typeFromHandle = typeof(T);
+			string entitySchemaName = GetEntitySchemaName(typeFromHandle);
+			EntitySchemaQuery esq = new EntitySchemaQuery(UserConnection.EntitySchemaManager, entitySchemaName);
+			try {
+				esq.UseAdminRights = UseAdminRight;
+				esq.PrimaryQueryColumn.IsAlwaysSelect = true;
+				if (filterCollection == null) {
+					throw new ArgumentException();
+				}
+
+				esq.Filters.Add(filterCollection);
+				(from x in ModelMapper.GetProperties(typeFromHandle)
+				 where !x.IsLazy && x.EntityColumnName != DefaultPrimaryEntityColumnName
+				 select x).ForEach(delegate (ModelItem x) {
+					 try {
+						 esq.AddColumn(x.EntityColumnName);
+					 } catch (Exception ex3) {
+						 LogEvent("AddESQColumn. EntityColumnName: " + x.EntityColumnName + ", \n ErrorMessage: " + ex3.Message + ". At: " + ex3.StackTrace);
+						 throw;
+					 }
+				 });
+				ModelMapper.GetLookups(typeFromHandle).ForEach(delegate (ModelItem x) {
+					try {
+						if (esq.Columns.All((EntitySchemaQueryColumn c) => c.Name != x.EntityColumnName)) {
+							esq.AddColumn(x.EntityColumnName);
+						}
+					} catch (Exception ex2) {
+						LogEvent("AddESQLookupColumn. EntityColumnName: " + x.EntityColumnName + ", \n ErrorMessage: " + ex2.Message + ". At: " + ex2.StackTrace);
+						throw;
+					}
+				});
+			} catch (Exception) {
+				throw;
+			}
+
+			return esq;
+		}
+
 
 		private string GetColumnNameByPropertyName(Type type, ModelItem property) {
 			var entitySchema = GetEntitySchema(type);
@@ -474,21 +540,54 @@
 				: null;
 		}
 
-		public List<T> GetItems<T>(string filterPropertyName, Guid filterValue) where T : BaseModel, new() {
-			var response = new List<T>();
+		public List<T> GetItems<T>(string filterPropertyName, Guid filterValue, int rowCount=-1) where T : BaseModel, new() {
+			List<T> response = new List<T>();
 			try {
-				var recordsValues = GetRecordsValues<T>(new Filter() { EntityColumnName = filterPropertyName, EntityColumnValue = filterValue });
-				recordsValues.ForEach(recordValues => {
-					var model = LoadModelByValues<T>(recordValues);
-					if (model != null) {
-						response.Add(model);
-					}
-				});
-			} catch (Exception e) {
-				LogEvent(
-					$"GetItems. DetailLinkPropertyName: {filterPropertyName}, MasterId: {filterValue}. \n ErrorMessage: {e.Message}. At: {e.StackTrace}");
+				this.GetRecordsValues<T>(new ATF.Repository.Repository.Filter() {
+					EntityColumnName = filterPropertyName,
+					EntityColumnValue = filterValue
+				}).ForEach((Action<IDictionary<string, object>>)(recordValues =>
+				{
+					T obj = this.LoadModelByValues<T>(recordValues);
+					if ((object)obj == null)
+						return;
+					response.Add(obj);
+				}));
+			} catch (Exception ex) {
+				this.LogEvent(string.Format("GetItems. DetailLinkPropertyName: {0}, MasterId: {1}. \n ErrorMessage: {2}. At: {3}", (object)filterPropertyName, (object)filterValue, (object)ex.Message, (object)ex.StackTrace));
 				throw;
 			}
+			return response;
+		}
+
+		private List<IDictionary<string, object>> GetRecordsValues<T>(ATF.Repository.Repository.Filter filter)
+	  where T : BaseModel, new() {
+			List<IDictionary<string, object>> response = new List<IDictionary<string, object>>();
+			if (!this.DataStoreEnabled || string.IsNullOrEmpty(filter.EntityColumnName) || filter.EntityColumnValue == Guid.Empty)
+				return response;
+			try {
+				this.GetValuesEsq<T>(filter).GetEntityCollection(this.UserConnection).ForEach<Entity>((Action<Entity>)(entity => response.Add(this.GetValuesFromEntity<T>(entity))));
+			} catch (Exception ex) {
+				this.LogEvent(string.Format("GetRecordsValues. DetailLinkPropertyName: {0}, MasterId: {1}. \n ErrorMessage: {2}. At: {3}", (object)filter.EntityColumnName, (object)filter.EntityColumnValue, (object)ex.Message, (object)ex.StackTrace));
+				throw;
+			}
+			return response;
+		}
+
+		public List<T> GetItems<T>(EntitySchemaQueryFilterCollection filterCollection, int rowCount = -1) where T : BaseModel, new() {
+			List<T> response = new List<T>();
+			try {
+				List<IDictionary<string, object>> recordsValues = GetRecordsValues<T>(filterCollection, rowCount);
+				recordsValues.ForEach(delegate (IDictionary<string, object> recordValues) {
+					T val = LoadModelByValues<T>(recordValues);
+					if (val != null) {
+						response.Add(val);
+					}
+				});
+			} catch (Exception) {
+				throw;
+			}
+
 			return response;
 		}
 
