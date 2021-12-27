@@ -531,13 +531,10 @@
 		#region Methods: Public
 
 		public T GetItem<T>(Guid id) where T : BaseModel, new() {
-			if (Items.ContainsKey(id)) {
-				return (T)Items[id];
-			}
-			var items = GetItems<T>(DefaultPrimaryEntityColumnName, id);
-			return items.Count > 0
-				? items.First()
-				: null;
+			if (this.Items.ContainsKey(id))
+				return (T)this.Items[id];
+			List<T> items = this.GetItems<T>(ATF.Repository.Repository.DefaultPrimaryEntityColumnName, id);
+			return items.Count > 0 ? items.First<T>() : default(T);
 		}
 
 		public List<T> GetItems<T>(string filterPropertyName, Guid filterValue, int rowCount=-1) where T : BaseModel, new() {
